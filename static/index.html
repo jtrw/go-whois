@@ -9,6 +9,18 @@
             rel="stylesheet"
         />
         <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+        <style type="text/css">
+            .htmx-indicator{
+                opacity:0;
+                transition: opacity 500ms ease-in;
+            }
+            .htmx-request .htmx-indicator{
+                opacity:1;
+            }
+            .htmx-request.htmx-indicator{
+                opacity:1;
+            }
+        </style
     </head>
     <body class="container mt-5">
         <h2 class="mb-4">Перевірка доменів</h2>
@@ -28,8 +40,17 @@
                     placeholder="Введіть домен (example.com)"
                     required
                 />
-                <button type="submit" class="btn btn-primary">
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                    hx-indicator="#spiner"
+                >
                     Перевірити
+                    <img
+                        src="/static/bars.svg"
+                        class="htmx-indicator"
+                        id="spiner"
+                        alt="Loading...">
                 </button>
             </div>
         </form>
@@ -44,7 +65,11 @@
                     <th>Дії</th>
                 </tr>
             </thead>
-            <tbody id="domain-table"></tbody>
+            <tbody
+                id="domain-table"
+                hx-get="/domains"
+                hx-trigger="load"
+            ></tbody>
         </table>
     </body>
 </html>
