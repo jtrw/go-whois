@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/likexian/whois"
 	"go.etcd.io/bbolt"
@@ -18,6 +19,7 @@ import (
 
 // DomainInfo структура для збереження інформації про домен
 type DomainInfo struct {
+	Uuid         string
 	Domain       string
 	WhoisData    string
 	SSLValid     bool
@@ -87,9 +89,14 @@ func main() {
 	LoadDomainsFromDB()
 
 	r := mux.NewRouter()
+
+	//add static folder
+	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
 	r.HandleFunc("/", serveIndex).Methods("GET")
 	r.HandleFunc("/check", checkDomain).Methods("POST")
 	r.HandleFunc("/delete", deleteDomain).Methods("POST")
+	r.HandleFunc("/domains", listDomains).Methods("GET")
 
 	log.Println("Сервер запущено на :8080")
 	http.ListenAndServe(":8080", r)
@@ -98,6 +105,15 @@ func main() {
 // serveIndex віддає HTML-файл
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
+}
+
+func listDomains(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, domain := range domains {
+		renderTableRow(w, domain)
+	}
 }
 
 // checkDomain перевіряє WHOIS та SSL домену
@@ -126,7 +142,9 @@ func checkDomain(w http.ResponseWriter, r *http.Request) {
 
 	isExpired := !sslValid
 
+	uuid := uuid.New().String()
 	info := DomainInfo{
+		Uuid:         uuid,
 		Domain:       domain,
 		WhoisData:    whoisData,
 		SSLValid:     sslValid,
@@ -150,10 +168,12 @@ func deleteDomain(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Видаляємо з БД
+	// Видаляємо домен із пам’яті та бази
 	DeleteDomain(domain)
-
 	delete(domains, domain)
+
+	// Повертаємо пусту відповідь для HTMX
+	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(""))
 }
 
@@ -193,13 +213,21 @@ func checkSSLCertificate(domain string) (bool, string, error) {
 
 // renderTableRow відображає HTML-рядок для таблиці
 func renderTableRow(w http.ResponseWriter, domain DomainInfo) {
+	// Замінюємо крапки у домені, бо HTMX не може працювати з "." у id
+	// safeDomainID := strings.ReplaceAll(domain.Domain, ".", "-")
+	// domain.Domain = safeDomainID
+
 	tmpl := `
-<tr id="row-{{.Domain}}" class="{{if .IsExpired}}table-danger{{end}}">
+<tr id="row-{{.Uuid}}" class="{{if .IsExpired}}table-danger{{end}}">
     <td>{{.Domain}}</td>
     <td>{{.DomainExpire}}</td>
     <td>{{.SSLExpires}}</td>
     <td>
-        <button class="btn btn-sm btn-danger" hx-post="/delete" hx-vals='{"domain":"{{.Domain}}"}' hx-target="#row-{{.Domain}}" hx-swap="outerHTML">
+        <button class="btn btn-sm btn-danger"
+                hx-post="/delete"
+                hx-vals='{"domain": "{{.Domain}}"}'
+                hx-target="#row-{{.Uuid}}"
+                hx-swap="outerHTML">
             ❌ Видалити
         </button>
     </td>
