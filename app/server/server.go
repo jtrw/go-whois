@@ -5,16 +5,18 @@ import (
 	"crypto/md5"
 	"crypto/tls"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
-	"github.com/didip/tollbooth"
+	"github.com/didip/tollbooth/v7"
 	"github.com/didip/tollbooth_chi"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -23,6 +25,7 @@ import (
 	"github.com/jtrw/go-rest"
 	"github.com/likexian/whois"
 	"github.com/pkg/errors"
+	"go.etcd.io/bbolt"
 )
 
 type DomainInfo struct {
@@ -47,6 +50,13 @@ type Server struct {
 	AuthPassword   string
 	Context        context.Context
 }
+
+var (
+	domains = make(map[string]DomainInfo)
+	mu      sync.Mutex
+)
+
+var db *bbolt.DB
 
 func (s Server) Run(ctx context.Context) error {
 	log.Printf("[INFO] activate rest server")
@@ -86,17 +96,21 @@ func (s Server) routes() chi.Router {
 	router.Use(tollbooth_chi.LimitHandler(tollbooth.NewLimiter(10, nil)))
 	router.Use(middleware.Logger)
 
-	router.Route(
-		"/api/v1", func(r chi.Router) {
-			//r.Use(Cors)
-			//r.Use(Auth(authHandle.GetToken()))
+	router.Get("/", serveIndex)
+	router.Post("/check", checkDomain)
+	router.Post("/delete", deleteDomain)
+	router.Get("/domains", listDomains)
 
-			r.HandleFunc("/index", serveIndex).Methods("GET")
-			r.Post("/check", checkDomain)
-			r.Post("/delete", deleteDomain)
-			r.Get("/domains", listDomains)
-		},
-	)
+	// router.Route(
+	// 	"/", func(r chi.Router) {
+	// 		//r.Use(Cors)
+	// 		//r.Use(Auth(authHandle.GetToken()))
+	// 		r.Get("/", serveIndex)
+	// 		r.Post("/check", checkDomain)
+	// 		r.Post("/delete", deleteDomain)
+	// 		r.Get("/domains", listDomains)
+	// 	},
+	// )
 
 	router.Get(
 		"/robots.txt", func(w http.ResponseWriter, r *http.Request) {
@@ -292,4 +306,19 @@ func renderTableRow(w http.ResponseWriter, domain DomainInfo) {
 </tr>`
 	t := template.Must(template.New("row").Parse(tmpl))
 	t.Execute(w, domain)
+}
+
+func SaveDomain(domain DomainInfo) {
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("domains"))
+		data, _ := json.Marshal(domain)
+		return b.Put([]byte(domain.Domain), data)
+	})
+}
+
+func DeleteDomain(domain string) {
+	db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("domains"))
+		return b.Delete([]byte(domain))
+	})
 }

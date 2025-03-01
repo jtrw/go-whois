@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alicebob/miniredis/server"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/jessevdk/go-flags"
@@ -142,7 +141,7 @@ func main() {
 	if err := srv.Run(ctx); err != nil {
 		log.Printf("[ERROR] failed, %+v", err)
 	}
-
+	return
 	// Ініціалізація бази даних
 	InitDB()
 	defer CloseDB()
