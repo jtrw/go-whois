@@ -1,31 +1,30 @@
-package main
+package server
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/tls"
 	"embed"
-	"encoding/json"
 	"fmt"
-	server "go-whios/app/server"
-	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"sync"
-	"syscall"
+	"text/template"
 	"time"
 
-	"github.com/alicebob/miniredis/server"
+	"github.com/didip/tollbooth"
+	"github.com/didip/tollbooth_chi"
+	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/render"
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
-	"github.com/jessevdk/go-flags"
+	"github.com/jtrw/go-rest"
 	"github.com/likexian/whois"
-	"go.etcd.io/bbolt"
+	"github.com/pkg/errors"
 )
 
-// DomainInfo структура для збереження інформації про домен
 type DomainInfo struct {
 	Uuid         string
 	Domain       string
@@ -36,135 +35,132 @@ type DomainInfo struct {
 	IsExpired    bool
 }
 
-var (
-	domains = make(map[string]DomainInfo)
-	mu      sync.Mutex
-)
-
-var db *bbolt.DB
-var webFS embed.FS
-
-type Options struct {
-	Listen         string        `short:"l" long:"listen" env:"LISTEN_SERVER" default:":8080" description:"listen address"`
-	PinSize        int           `long:"pinszie" env:"PIN_SIZE" default:"5" description:"pin size"`
-	MaxExpire      time.Duration `long:"expire" env:"MAX_EXPIRE" default:"24h" description:"max lifetime"`
-	MaxPinAttempts int           `long:"pinattempts" env:"PIN_ATTEMPTS" default:"3" description:"max attempts to enter pin"`
-	WebRoot        string        `long:"web" env:"WEB" default:"./web" description:"web ui location"`
-	AuthLogin      string        `long:"auth-login" env:"AUTH_LOGIN" default:"admin" description:"auth login"`
-	AuthPassword   string        `long:"auth-password" env:"AUTH_PASSWORD" default:"admin" description:"auth password"`
+type Server struct {
+	Listen         string
+	PinSize        int
+	MaxPinAttempts int
+	MaxExpire      time.Duration
+	WebRoot        string
+	WebFS          embed.FS
+	Version        string
+	AuthLogin      string
+	AuthPassword   string
+	Context        context.Context
 }
 
-func InitDB() {
-	var err error
-	db, err = bbolt.Open("jWhois.db", 0600, nil)
-	if err != nil {
-		log.Fatal(err)
+func (s Server) Run(ctx context.Context) error {
+	log.Printf("[INFO] activate rest server")
+	log.Printf("[INFO] Listen: %s", s.Listen)
+
+	httpServer := &http.Server{
+		Addr:              s.Listen,
+		Handler:           s.routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 
-	db.Update(func(tx *bbolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("domains"))
-		return err
-	})
-}
-
-func SaveDomain(domain DomainInfo) {
-	db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		data, _ := json.Marshal(domain)
-		return b.Put([]byte(domain.Domain), data)
-	})
-}
-
-func LoadDomainsFromDB() {
-	db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		b.ForEach(func(k, v []byte) error {
-			var domain DomainInfo
-			json.Unmarshal(v, &domain)
-			domains[string(k)] = domain
-			return nil
-		})
-		return nil
-	})
-}
-
-func DeleteDomain(domain string) {
-	db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		return b.Delete([]byte(domain))
-	})
-}
-
-func CloseDB() {
-	db.Close()
-}
-
-var revision string
-
-func main() {
-	log.Printf("Micro Whios redis %s\n", revision)
-
-	var opts Options
-	parser := flags.NewParser(&opts, flags.Default)
-	_, err := parser.Parse()
-	if err != nil {
-
-		log.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		if x := recover(); x != nil {
-			log.Printf("[WARN] run time panic:\n%v", x)
-			panic(x)
+		<-ctx.Done()
+		if httpServer != nil {
+			if clsErr := httpServer.Close(); clsErr != nil {
+				log.Printf("[ERROR] failed to close proxy http server, %v", clsErr)
+			}
 		}
-
-		// catch signal and invoke graceful termination
-		stop := make(chan os.Signal, 1)
-		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-		<-stop
-		log.Printf("[WARN] interrupt signal")
-		cancel()
 	}()
 
-	srv := server.Server{
-		Listen:         opts.Listen,
-		PinSize:        opts.PinSize,
-		MaxExpire:      opts.MaxExpire,
-		MaxPinAttempts: opts.MaxPinAttempts,
-		WebRoot:        opts.WebRoot,
-		WebFS:          webFS,
-		Version:        revision,
-		AuthLogin:      opts.AuthLogin,
-		AuthPassword:   opts.AuthPassword,
-		Context:        ctx,
+	err := httpServer.ListenAndServe()
+	log.Printf("[WARN] http server terminated, %s", err)
+
+	if err != http.ErrServerClosed {
+		return errors.Wrap(err, "server failed")
 	}
-	if err := srv.Run(ctx); err != nil {
-		log.Printf("[ERROR] failed, %+v", err)
-	}
-
-	// Ініціалізація бази даних
-	InitDB()
-	defer CloseDB()
-
-	// Завантажуємо домени з БД при старті
-	LoadDomainsFromDB()
-
-	r := mux.NewRouter()
-
-	//add static folder
-	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-
-	r.HandleFunc("/", serveIndex).Methods("GET")
-	r.HandleFunc("/check", checkDomain).Methods("POST")
-	r.HandleFunc("/delete", deleteDomain).Methods("POST")
-	r.HandleFunc("/domains", listDomains).Methods("GET")
-
-	log.Println("Сервер запущено на :8080")
-	http.ListenAndServe(":8080", r)
+	return err
 }
 
-// serveIndex віддає HTML-файл
+func (s Server) routes() chi.Router {
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID, middleware.RealIP)
+	router.Use(middleware.Throttle(1000), middleware.Timeout(60*time.Second))
+	router.Use(rest.AppInfo("Whios", "Jrtw", s.Version), rest.Ping)
+	router.Use(tollbooth_chi.LimitHandler(tollbooth.NewLimiter(10, nil)))
+	router.Use(middleware.Logger)
+
+	router.Route(
+		"/api/v1", func(r chi.Router) {
+			//r.Use(Cors)
+			//r.Use(Auth(authHandle.GetToken()))
+
+			r.HandleFunc("/index", serveIndex).Methods("GET")
+			r.Post("/check", checkDomain)
+			r.Post("/delete", deleteDomain)
+			r.Get("/domains", listDomains)
+		},
+	)
+
+	router.Get(
+		"/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+			render.PlainText(w, r, "User-agent: *\nDisallow: /\n")
+		},
+	)
+
+	addFileServer(router, s.WebFS, s.WebRoot, s.Version)
+
+	return router
+}
+
+func addFileServer(r chi.Router, embedFS embed.FS, webRoot, version string) {
+	var webFS http.Handler
+	log.Printf("[INFO] webRoot: %s", webRoot)
+	if _, err := os.Stat(webRoot); err == nil {
+		log.Printf("[INFO] run file server from %s from the disk", webRoot)
+		webFS = http.FileServer(http.Dir(webRoot))
+	} else {
+		log.Printf("[INFO] run file server, embedded")
+		var contentFS, _ = fs.Sub(embedFS, "web")
+		webFS = http.FileServer(http.FS(contentFS))
+	}
+
+	webFS = http.StripPrefix("/web", webFS)
+	r.Get("/web", http.RedirectHandler("/web/", http.StatusMovedPermanently).ServeHTTP)
+
+	r.With(tollbooth_chi.LimitHandler(tollbooth.NewLimiter(20, nil)),
+		middleware.Timeout(10*time.Second),
+		cacheControl(time.Hour, version),
+	).Get("/web/*", func(w http.ResponseWriter, r *http.Request) {
+		// don't show dirs, just serve files
+		if strings.HasSuffix(r.URL.Path, "/") && len(r.URL.Path) > 1 && r.URL.Path != ("/web/") {
+			http.NotFound(w, r)
+			return
+		}
+		webFS.ServeHTTP(w, r)
+	})
+}
+
+func cacheControl(expiration time.Duration, version string) func(http.Handler) http.Handler {
+	etag := func(r *http.Request, version string) string {
+		s := version + ":" + r.URL.String()
+		return fmt.Sprintf("%x", md5.Sum([]byte(s)))
+	}
+
+	return func(h http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			e := `"` + etag(r, version) + `"`
+			w.Header().Set("Etag", e)
+			w.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d, no-cache", int(expiration.Seconds())))
+
+			if match := r.Header.Get("If-None-Match"); match != "" {
+				if strings.Contains(match, e) {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+			h.ServeHTTP(w, r)
+		}
+		return http.HandlerFunc(fn)
+	}
+}
+
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
 }
