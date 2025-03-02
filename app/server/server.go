@@ -22,9 +22,9 @@ import (
 	"github.com/go-chi/chi/middleware"
 	"github.com/go-chi/render"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"github.com/jtrw/go-rest"
 	"github.com/likexian/whois"
-	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
 )
 
@@ -61,6 +61,17 @@ var db *bbolt.DB
 func (s Server) Run(ctx context.Context) error {
 	log.Printf("[INFO] activate rest server")
 	log.Printf("[INFO] Listen: %s", s.Listen)
+	r := mux.NewRouter()
+	//add static folder
+	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	r.HandleFunc("/", serveIndex).Methods("GET")
+	r.HandleFunc("/check", checkDomain).Methods("POST")
+	r.HandleFunc("/delete", deleteDomain).Methods("POST")
+	r.HandleFunc("/domains", listDomains).Methods("GET")
+
+	log.Println("Сервер запущено на :8080")
+	http.ListenAndServe(":8080", r)
 
 	httpServer := &http.Server{
 		Addr:              s.Listen,
@@ -70,22 +81,22 @@ func (s Server) Run(ctx context.Context) error {
 		IdleTimeout:       30 * time.Second,
 	}
 
-	go func() {
-		<-ctx.Done()
-		if httpServer != nil {
-			if clsErr := httpServer.Close(); clsErr != nil {
-				log.Printf("[ERROR] failed to close proxy http server, %v", clsErr)
-			}
-		}
-	}()
+	// go func() {
+	// 	<-ctx.Done()
+	// 	if httpServer != nil {
+	// 		if clsErr := httpServer.Close(); clsErr != nil {
+	// 			log.Printf("[ERROR] failed to close proxy http server, %v", clsErr)
+	// 		}
+	// 	}
+	// }()
 
-	err := httpServer.ListenAndServe()
-	log.Printf("[WARN] http server terminated, %s", err)
+	// err := httpServer.ListenAndServe()
+	// log.Printf("[WARN] http server terminated, %s", err)
 
-	if err != http.ErrServerClosed {
-		return errors.Wrap(err, "server failed")
-	}
-	return err
+	// if err != http.ErrServerClosed {
+	// 	return errors.Wrap(err, "server failed")
+	// }
+	// return err
 }
 
 func (s Server) routes() chi.Router {
