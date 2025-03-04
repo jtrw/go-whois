@@ -41,6 +41,7 @@ type Server struct {
 	AuthLogin      string
 	AuthPassword   string
 	Context        context.Context
+	DB             *bbolt.DB
 }
 
 var (
@@ -82,9 +83,26 @@ func listDomains(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	domains := LoadDomainsFromDB()
+
 	for _, domain := range domains {
 		renderTableRow(w, domain)
 	}
+}
+
+func LoadDomainsFromDB() map[string]DomainInfo {
+	db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("domains"))
+		b.ForEach(func(k, v []byte) error {
+			var domain DomainInfo
+			json.Unmarshal(v, &domain)
+			domains[string(k)] = domain
+			return nil
+		})
+		return nil
+	})
+
+	return domains
 }
 
 // checkDomain перевіряє WHOIS та SSL домену
@@ -125,7 +143,7 @@ func checkDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Зберігаємо в БД
-	SaveDomain(info)
+	//SaveDomain(info)
 
 	domains[domain] = info
 	renderTableRow(w, info)

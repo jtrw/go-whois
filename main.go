@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 	"github.com/jessevdk/go-flags"
 	"github.com/likexian/whois"
 	"go.etcd.io/bbolt"
@@ -53,17 +52,20 @@ type Options struct {
 	AuthPassword   string        `long:"auth-password" env:"AUTH_PASSWORD" default:"admin" description:"auth password"`
 }
 
-func InitDB() {
-	var err error
-	db, err = bbolt.Open("jWhois.db", 0600, nil)
+func InitDB() *bbolt.DB {
+	db, err := bbolt.Open("jWhois.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	defer db.Close()
 
 	db.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte("domains"))
 		return err
 	})
+
+	return db
 }
 
 func SaveDomain(domain DomainInfo) {
@@ -126,6 +128,8 @@ func main() {
 		cancel()
 	}()
 
+	db := InitDB()
+
 	srv := server.Server{
 		Listen:         opts.Listen,
 		PinSize:        opts.PinSize,
@@ -137,30 +141,31 @@ func main() {
 		AuthLogin:      opts.AuthLogin,
 		AuthPassword:   opts.AuthPassword,
 		Context:        ctx,
+		DB:             db,
 	}
 	if err := srv.Run(ctx); err != nil {
 		log.Printf("[ERROR] failed, %+v", err)
 	}
 	return
 	// Ініціалізація бази даних
-	InitDB()
-	defer CloseDB()
+
+	//defer CloseDB()
 
 	// Завантажуємо домени з БД при старті
-	LoadDomainsFromDB()
+	//LoadDomainsFromDB()
 
-	r := mux.NewRouter()
+	//r := mux.NewRouter()
 
 	//add static folder
-	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	//r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	r.HandleFunc("/", serveIndex).Methods("GET")
-	r.HandleFunc("/check", checkDomain).Methods("POST")
-	r.HandleFunc("/delete", deleteDomain).Methods("POST")
-	r.HandleFunc("/domains", listDomains).Methods("GET")
+	//r.HandleFunc("/", serveIndex).Methods("GET")
+	//r.HandleFunc("/check", checkDomain).Methods("POST")
+	//r.HandleFunc("/delete", deleteDomain).Methods("POST")
+	//r.HandleFunc("/domains", listDomains).Methods("GET")
 
-	log.Println("Сервер запущено на :8080")
-	http.ListenAndServe(":8080", r)
+	//log.Println("Сервер запущено на :8080")
+	//http.ListenAndServe(":8080", r)
 }
 
 // serveIndex віддає HTML-файл
