@@ -58,10 +58,10 @@ func (s Server) Run(ctx context.Context) error {
 	//add static folder
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	r.HandleFunc("/", serveIndex).Methods("GET")
-	r.HandleFunc("/check", checkDomain).Methods("POST")
-	r.HandleFunc("/delete", deleteDomain).Methods("POST")
-	r.HandleFunc("/domains", listDomains).Methods("GET")
+	r.HandleFunc("/", s.serveIndex).Methods("GET")
+	r.HandleFunc("/check", s.checkDomain).Methods("POST")
+	r.HandleFunc("/delete", s.deleteDomain).Methods("POST")
+	r.HandleFunc("/domains", s.listDomains).Methods("GET")
 
 	r.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
 		render.PlainText(w, r, "User-agent: *\nDisallow: /\n")
@@ -69,29 +69,36 @@ func (s Server) Run(ctx context.Context) error {
 
 	log.Printf("[INFO] Running server on %s", s.Listen)
 
+	go func() {
+		<-ctx.Done()
+		if err := db.Close(); err != nil {
+			log.Printf("[ERROR] failed to close db, %v", err)
+		}
+	}()
+
 	if err := http.ListenAndServe(s.Listen, r); err != nil {
 		log.Printf("[ERROR] failed, %+v", err)
 	}
 	return nil
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request) {
+func (s Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
 }
 
-func listDomains(w http.ResponseWriter, r *http.Request) {
+func (s Server) listDomains(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	domains := LoadDomainsFromDB()
+	domains := LoadDomainsFromDB(s.DB)
 
 	for _, domain := range domains {
 		renderTableRow(w, domain)
 	}
 }
 
-func LoadDomainsFromDB() map[string]DomainInfo {
-	db.View(func(tx *bbolt.Tx) error {
+func LoadDomainsFromDB(dbB *bbolt.DB) map[string]DomainInfo {
+	dbB.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("domains"))
 		b.ForEach(func(k, v []byte) error {
 			var domain DomainInfo
@@ -106,7 +113,7 @@ func LoadDomainsFromDB() map[string]DomainInfo {
 }
 
 // checkDomain перевіряє WHOIS та SSL домену
-func checkDomain(w http.ResponseWriter, r *http.Request) {
+func (s Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	domain := r.Form.Get("domain")
 
@@ -143,14 +150,14 @@ func checkDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Зберігаємо в БД
-	//SaveDomain(info)
+	SaveDomain(s.DB, info)
 
 	domains[domain] = info
 	renderTableRow(w, info)
 }
 
 // deleteDomain видаляє домен
-func deleteDomain(w http.ResponseWriter, r *http.Request) {
+func (s Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	domain := r.Form.Get("domain")
 
@@ -225,8 +232,8 @@ func renderTableRow(w http.ResponseWriter, domain DomainInfo) {
 	t.Execute(w, domain)
 }
 
-func SaveDomain(domain DomainInfo) {
-	db.Update(func(tx *bbolt.Tx) error {
+func SaveDomain(dbB *bbolt.DB, domain DomainInfo) {
+	dbB.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte("domains"))
 		data, _ := json.Marshal(domain)
 		return b.Put([]byte(domain.Domain), data)
