@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	server "go-whios/app/server"
 	"log"
 	"os"
@@ -51,7 +50,7 @@ func InitDB() *bbolt.DB {
 		log.Fatal(err)
 	}
 
-	defer db.Close()
+	//defer db.Close()
 
 	db.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte("domains"))
@@ -59,34 +58,6 @@ func InitDB() *bbolt.DB {
 	})
 
 	return db
-}
-
-func SaveDomain(domain DomainInfo) {
-	db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		data, _ := json.Marshal(domain)
-		return b.Put([]byte(domain.Domain), data)
-	})
-}
-
-func LoadDomainsFromDB() {
-	db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		b.ForEach(func(k, v []byte) error {
-			var domain DomainInfo
-			json.Unmarshal(v, &domain)
-			domains[string(k)] = domain
-			return nil
-		})
-		return nil
-	})
-}
-
-func DeleteDomain(domain string) {
-	db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		return b.Delete([]byte(domain))
-	})
 }
 
 func CloseDB() {
@@ -108,6 +79,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	db := InitDB()
 	go func() {
 		if x := recover(); x != nil {
 			log.Printf("[WARN] run time panic:\n%v", x)
@@ -119,10 +91,9 @@ func main() {
 		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 		<-stop
 		log.Printf("[WARN] interrupt signal")
+
 		cancel()
 	}()
-
-	db := InitDB()
 
 	srv := server.Server{
 		Listen:         opts.Listen,
