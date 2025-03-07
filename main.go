@@ -35,6 +35,7 @@ var db *bbolt.DB
 var webFS embed.FS
 
 type Options struct {
+	Database       string        `long:"databases" env:"DATABASES" default:"jWhois.db" description:"databases location"`
 	Listen         string        `short:"l" long:"listen" env:"LISTEN_SERVER" default:":8080" description:"listen address"`
 	PinSize        int           `long:"pinszie" env:"PIN_SIZE" default:"5" description:"pin size"`
 	MaxExpire      time.Duration `long:"expire" env:"MAX_EXPIRE" default:"24h" description:"max lifetime"`
@@ -44,8 +45,8 @@ type Options struct {
 	AuthPassword   string        `long:"auth-password" env:"AUTH_PASSWORD" default:"admin" description:"auth password"`
 }
 
-func InitDB() *bbolt.DB {
-	db, err := bbolt.Open("jWhois.db", 0600, nil)
+func InitDB(path string) *bbolt.DB {
+	db, err := bbolt.Open(path, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	db := InitDB()
+	db := InitDB(opts.Database)
 	go func() {
 		if x := recover(); x != nil {
 			log.Printf("[WARN] run time panic:\n%v", x)
