@@ -207,12 +207,7 @@ func checkSSLCertificate(domain string) (bool, string, error) {
 	return isValid, cert.NotAfter.Format("2006-01-02"), nil
 }
 
-// renderTableRow відображає HTML-рядок для таблиці
 func renderTableRow(w http.ResponseWriter, domain DomainInfo) {
-	// Замінюємо крапки у домені, бо HTMX не може працювати з "." у id
-	// safeDomainID := strings.ReplaceAll(domain.Domain, ".", "-")
-	// domain.Domain = safeDomainID
-
 	tmpl := `
 <tr id="row-{{.Uuid}}" class="{{if .IsExpired}}table-danger{{end}}">
     <td>{{.Domain}}</td>
