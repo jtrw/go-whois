@@ -1,4 +1,4 @@
-package db
+package store
 
 import (
 	"encoding/json"
@@ -42,7 +42,8 @@ func SaveDomain(domain DomainInfo) {
 	})
 }
 
-func LoadDomainsFromDB() {
+func LoadDomainsFromDB() map[string]DomainInfo {
+	domains := make(map[string]DomainInfo)
 	db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(DOMAIN_BUCKET))
 		b.ForEach(func(k, v []byte) error {
@@ -53,6 +54,8 @@ func LoadDomainsFromDB() {
 		})
 		return nil
 	})
+
+	return domains
 }
 
 func DeleteDomain(domain string) {
