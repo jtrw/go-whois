@@ -21,9 +21,13 @@ type DomainInfo struct {
 	IsExpired    bool
 }
 
-func InitDB() {
+type Store struct {
+	db *bbolt.DB
+}
+
+func InitDB(path string) Store {
 	var err error
-	db, err = bbolt.Open("whois.db", 0600, nil)
+	db, err = bbolt.Open(path, 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -32,19 +36,21 @@ func InitDB() {
 		_, err := tx.CreateBucketIfNotExists([]byte(DOMAIN_BUCKET))
 		return err
 	})
+
+	return Store{db: db}
 }
 
-func SaveDomain(domain DomainInfo) {
-	db.Update(func(tx *bbolt.Tx) error {
+func (s Store) SaveDomain(domain DomainInfo) {
+	s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(DOMAIN_BUCKET))
 		data, _ := json.Marshal(domain)
 		return b.Put([]byte(domain.Domain), data)
 	})
 }
 
-func LoadDomainsFromDB() map[string]DomainInfo {
+func (s Store) LoadDomainsFromDB() map[string]DomainInfo {
 	domains := make(map[string]DomainInfo)
-	db.View(func(tx *bbolt.Tx) error {
+	s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(DOMAIN_BUCKET))
 		b.ForEach(func(k, v []byte) error {
 			var domain DomainInfo
@@ -58,13 +64,13 @@ func LoadDomainsFromDB() map[string]DomainInfo {
 	return domains
 }
 
-func DeleteDomain(domain string) {
-	db.Update(func(tx *bbolt.Tx) error {
+func (s Store) DeleteDomain(domain string) {
+	s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(DOMAIN_BUCKET))
 		return b.Delete([]byte(domain))
 	})
 }
 
-func CloseDB() {
-	db.Close()
+func (s Store) CloseDB() {
+	s.db.Close()
 }
