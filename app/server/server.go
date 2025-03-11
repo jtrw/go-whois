@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"go-whios/app/store"
 	"log"
 	"net/http"
 	"strings"
@@ -41,7 +42,7 @@ type Server struct {
 	AuthLogin      string
 	AuthPassword   string
 	Context        context.Context
-	DB             *bbolt.DB
+	Store          store.Store
 }
 
 var (
@@ -90,26 +91,15 @@ func (s Server) listDomains(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	domains := LoadDomainsFromDB(s.DB)
+	domains := LoadDomainsFromDB(s.Store)
 
 	for _, domain := range domains {
 		renderTableRow(w, domain)
 	}
 }
 
-func LoadDomainsFromDB(dbB *bbolt.DB) map[string]DomainInfo {
-	dbB.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		b.ForEach(func(k, v []byte) error {
-			var domain DomainInfo
-			json.Unmarshal(v, &domain)
-			domains[string(k)] = domain
-			return nil
-		})
-		return nil
-	})
-
-	return domains
+func LoadDomainsFromDB(stor store.Store) map[string]store.DomainInfo {
+	return stor.LoadDomainsFromDB()
 }
 
 // checkDomain перевіряє WHOIS та SSL домену
@@ -139,7 +129,7 @@ func (s Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 	isExpired := !sslValid
 
 	uuid := uuid.New().String()
-	info := DomainInfo{
+	info := store.DomainInfo{
 		Uuid:         uuid,
 		Domain:       domain,
 		WhoisData:    whoisData,
@@ -150,9 +140,10 @@ func (s Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Зберігаємо в БД
-	SaveDomain(s.DB, info)
+	s.Store.SaveDomain(info)
+	//SaveDomain(s.DB, info)
 
-	domains[domain] = info
+	//domains[domain] = info
 	renderTableRow(w, info)
 }
 
@@ -165,7 +156,8 @@ func (s Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	// Видаляємо домен із пам’яті та бази
-	DeleteDomain(domain)
+	//DeleteDomain(domain)
+	s.Store.DeleteDomain(domain)
 	delete(domains, domain)
 
 	// Повертаємо пусту відповідь для HTMX
@@ -207,7 +199,7 @@ func checkSSLCertificate(domain string) (bool, string, error) {
 	return isValid, cert.NotAfter.Format("2006-01-02"), nil
 }
 
-func renderTableRow(w http.ResponseWriter, domain DomainInfo) {
+func renderTableRow(w http.ResponseWriter, domain store.DomainInfo) {
 	tmpl := `
 <tr id="row-{{.Uuid}}" class="{{if .IsExpired}}table-danger{{end}}">
     <td>{{.Domain}}</td>
