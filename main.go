@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	server "go-whios/app/server"
+	"go-whios/app/store"
 	"log"
 	"os"
 	"os/signal"
@@ -79,8 +80,8 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-
-	db := InitDB(opts.Database)
+	store := store.InitDB(opts.Database)
+	//db := InitDB(opts.Database)
 	go func() {
 		if x := recover(); x != nil {
 			log.Printf("[WARN] run time panic:\n%v", x)
@@ -107,7 +108,7 @@ func main() {
 		AuthLogin:      opts.AuthLogin,
 		AuthPassword:   opts.AuthPassword,
 		Context:        ctx,
-		DB:             db,
+		Store:          store,
 	}
 	if err := srv.Run(ctx); err != nil {
 		log.Printf("[ERROR] failed, %+v", err)
