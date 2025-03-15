@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"go-whios/app/store"
 	"log"
@@ -139,15 +138,12 @@ func (s Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 		IsExpired:    isExpired,
 	}
 
-	// Зберігаємо в БД
 	s.Store.SaveDomain(info)
-	//SaveDomain(s.DB, info)
 
 	//domains[domain] = info
 	renderTableRow(w, info)
 }
 
-// deleteDomain видаляє домен
 func (s Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	domain := r.Form.Get("domain")
@@ -155,8 +151,6 @@ func (s Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Видаляємо домен із пам’яті та бази
-	//DeleteDomain(domain)
 	s.Store.DeleteDomain(domain)
 	delete(domains, domain)
 
@@ -217,19 +211,4 @@ func renderTableRow(w http.ResponseWriter, domain store.DomainInfo) {
 </tr>`
 	t := template.Must(template.New("row").Parse(tmpl))
 	t.Execute(w, domain)
-}
-
-func SaveDomain(dbB *bbolt.DB, domain DomainInfo) {
-	dbB.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		data, _ := json.Marshal(domain)
-		return b.Put([]byte(domain.Domain), data)
-	})
-}
-
-func DeleteDomain(domain string) {
-	db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("domains"))
-		return b.Delete([]byte(domain))
-	})
 }
