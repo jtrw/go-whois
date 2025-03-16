@@ -45,8 +45,7 @@ type Server struct {
 }
 
 var (
-	domains = make(map[string]DomainInfo)
-	mu      sync.Mutex
+	mu sync.Mutex
 )
 
 var db *bbolt.DB
@@ -140,7 +139,6 @@ func (s Server) checkDomain(w http.ResponseWriter, r *http.Request) {
 
 	s.Store.SaveDomain(info)
 
-	//domains[domain] = info
 	renderTableRow(w, info)
 }
 
@@ -152,7 +150,6 @@ func (s Server) deleteDomain(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	s.Store.DeleteDomain(domain)
-	delete(domains, domain)
 
 	// Повертаємо пусту відповідь для HTMX
 	w.WriteHeader(http.StatusOK)

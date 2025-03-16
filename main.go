@@ -46,26 +46,6 @@ type Options struct {
 	AuthPassword   string        `long:"auth-password" env:"AUTH_PASSWORD" default:"admin" description:"auth password"`
 }
 
-func InitDB(path string) *bbolt.DB {
-	db, err := bbolt.Open(path, 0600, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	//defer db.Close()
-
-	db.Update(func(tx *bbolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("domains"))
-		return err
-	})
-
-	return db
-}
-
-func CloseDB() {
-	db.Close()
-}
-
 var revision string
 
 func main() {
@@ -81,7 +61,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	store := store.InitDB(opts.Database)
-	//db := InitDB(opts.Database)
+
 	go func() {
 		if x := recover(); x != nil {
 			log.Printf("[WARN] run time panic:\n%v", x)
